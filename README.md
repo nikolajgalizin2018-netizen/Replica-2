@@ -12,7 +12,7 @@ master-сервер и несколько slave-серверов;
 Дайте ответ в свободной форме.
 
 ### Ответ: 
-Активный master-сервер и пассивный репликационный slave-сервер
+1. Активный master-сервер и пассивный репликационный slave-сервер
 Это схема «горячего резерва»: master обрабатывает всю нагрузку, slave постоянно получает изменения и готов в любой момент заменить master.
 Преимущества:
 
@@ -24,7 +24,7 @@ master-сервер и несколько slave-серверов;
 
 Предсказуемость. Все данные в одном месте (на master), slave — точная копия.
 
-Master-сервер и несколько slave-серверов
+2. Master-сервер и несколько slave-серверов
 Это схема масштабирования чтения: master принимает запись, несколько slave обслуживают SELECT-запросы.
 
 Преимущества:
@@ -125,8 +125,9 @@ Vertical Shard	Active (отдельный сервер)	Хранение тяж�
 ### Ответ:
 Для реализации плана используем Citus — расширение PostgreSQL для распределённой БД с шардированием и параллельными запросами.
 
-Docker Compose конфигурация
-yaml
+### Docker Compose конфигурация
+
+```yaml
 version: '3.8'
 
 networks:
@@ -191,11 +192,11 @@ volumes:
   coordinator_data:
   worker1_data:
   worker2_data:
-SQL-скрипт настройки кластера и шардинга
-sql
--- ============================================
--- 1. Включение Citus и добавление воркеров
--- ============================================
+```
+
+### SQL-скрипт
+
+```sql
 CREATE EXTENSION IF NOT EXISTS citus;
 
 SELECT citus_add_node('citus-worker1', 5432);
@@ -203,11 +204,6 @@ SELECT citus_add_node('citus-worker2', 5432);
 
 SELECT * FROM citus_get_active_worker_nodes();
 
--- ============================================
--- 2. Создание таблиц
--- ============================================
-
--- shops — reference-таблица
 CREATE TABLE shops (
     shop_id   SERIAL PRIMARY KEY,
     name      VARCHAR(255) NOT NULL,
@@ -215,7 +211,6 @@ CREATE TABLE shops (
     rating    NUMERIC(2,1)
 );
 
--- users — шардируется по user_id
 CREATE TABLE users (
     user_id    BIGSERIAL,
     email      VARCHAR(255) NOT NULL,
@@ -224,7 +219,6 @@ CREATE TABLE users (
     PRIMARY KEY (user_id)
 );
 
--- books — шардируется по book_id
 CREATE TABLE books (
     book_id   BIGSERIAL,
     title     VARCHAR(255) NOT NULL,
@@ -234,32 +228,16 @@ CREATE TABLE books (
     PRIMARY KEY (book_id)
 );
 
--- book_descriptions — вертикальный шард
 CREATE TABLE book_descriptions (
     book_id     BIGINT PRIMARY KEY,
     description TEXT
 );
 
--- ============================================
--- 3. Шардирование таблиц
--- ============================================
-
--- shops → reference table
 SELECT create_reference_table('shops');
-
--- users → распределённая по user_id
 SELECT create_distributed_table('users', 'user_id');
-
--- books → распределённая по book_id
 SELECT create_distributed_table('books', 'book_id');
-
--- book_descriptions → colocated с books
 SELECT create_distributed_table('book_descriptions', 'book_id',
     colocate_with => 'books');
-
--- ============================================
--- 4. Проверка распределения
--- ============================================
 
 SELECT logicalrelid, distributemethod, colocationid
 FROM pg_dist_partition;
@@ -275,15 +253,12 @@ JOIN pg_dist_node n ON n.groupid = p.groupid
 WHERE s.logicalrelid IN ('users'::regclass, 'books'::regclass)
 ORDER BY s.logicalrelid, s.shardid
 LIMIT 10;
-Ключевые принципы Citus
-Coordinator — точка входа для приложения. Принимает SQL, маршрутизирует на шарды, собирает результаты.
+```
+### Ключевые принципы Citus
 
-Worker nodes — хранят шарды и выполняют параллельные запросы.
-
-Distribution column — ключ шардирования. Для users — user_id, для books — book_id. Ключ шардирования должен быть частью PRIMARY KEY.
-
-Reference table (shops) — реплицируется на все воркеры, join с ней локальный и быстрый.
-
-Colocation (book_descriptions и books) — связанные таблицы с одинаковым ключом шардирования попадают на одни воркеры, join локальный.
-
+1. **Coordinator** — точка входа для приложения. Принимает SQL, маршрутизирует на шарды, собирает результаты.
+2. **Worker nodes** — хранят шарды и выполняют параллельные запросы.
+3. **Distribution column** — ключ шардирования. Для `users` — `user_id`, для `books` — `book_id`. Ключ шардинга должен быть частью PRIMARY KEY.
+4. **Reference table** (`shops`) — реплицируется на все воркеры, join с ней локальный и быстрый.
+5. **Colocation** (`book_descriptions` и `books`) — связанные таблицы с одинаковым ключом шардирования попадают на одни воркеры, join локальный.
 
