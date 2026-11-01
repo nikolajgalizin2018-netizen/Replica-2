@@ -254,6 +254,8 @@ WHERE s.logicalrelid IN ('users'::regclass, 'books'::regclass)
 ORDER BY s.logicalrelid, s.shardid
 LIMIT 10;
 ```
+### Скрипт включает Citus, подключает двух воркеров, создаёт четыре таблицы и раскладывает их: shops — копия везде, users и books — по шардам, book_descriptions — рядом с books. В конце проверяет, что всё разложилось правильно.
+
 ### Ключевые принципы Citus
 
 1. **Coordinator** — точка входа для приложения. Принимает SQL, маршрутизирует на шарды, собирает результаты.
